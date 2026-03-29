@@ -15,3 +15,20 @@ services:
     ports:
       - "6379:6379"
     command: redis-server --save "" --appendonly no
+
+  app:
+    image: eclipse-temurin:25-jdk
+    container_name: fipe-backend
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8081:8080"
+    volumes:
+      - ../target:/app
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/fipesearch
+      - SPRING_DATA_REDIS_HOST=redis
+      - APP_CACHE_WARM=${APP_CACHE_WARM:-false}
+    working_dir: /app
+    command: java -jar fipe-search-0.0.1-SNAPSHOT.jar

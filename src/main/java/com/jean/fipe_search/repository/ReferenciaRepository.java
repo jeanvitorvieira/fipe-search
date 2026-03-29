@@ -22,4 +22,7 @@ public interface ReferenciaRepository extends JpaRepository<ReferenciaEntity, Lo
     List<ConsultaFipeDTO> findReferencias(
             @Param("modeloId") Long modeloId,
             @Param("anoModelo") Integer anoModelo);
+
+    @Query(value = "SELECT pg_sleep(0.05)", nativeQuery = true)
+    void simulateDelay();
 }
