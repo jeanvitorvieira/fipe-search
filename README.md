@@ -1,75 +1,70 @@
-# Fipe Search + Redis
+## Fipe Search API
 
-Projeto prático construído a partir do artigo do **DevSuperior** [**"Use REDIS para reduzir a Latência de APIs REST"**](https://devsuperior.com.br/blog/use-redis-para-reduzir-a-latencia-de-apis-rest).
+API escalável para consulta de preços de veículos, desenvolvida para demonstrar a implementação de uma camada de Cache Distribuído utilizando Redis e persistência de dados com PostgreSQL.
 
-A ideia central se mantém: Spring Boot, PostgreSQL como fonte de verdade e Redis na frente das leituras para desafogar o banco. Limitamos o pool de conexões do Postgres propositalmente para mostrar como o banco vira gargalo recebendo carga simultânea pesada.
+## Tecnologias Utilizadas
+ * Java 25 (LTS)
+ * Spring Boot 4.0.5
+ * Spring Data Redis (Gestão de Cache)
+ * Spring Data JPA (Persistência de dados)
+ * PostgreSQL (Base de dados relacional)
+ * Docker & Docker Compose (Orquestração de infraestrutura)
+ * Maven (Gestão de dependências)
 
-De um lado você vai ver o Postgres gerando gargalo nas consultas e no pool de conexão, e de outro o Redis funcionando na prática lidando com `cache stampede`, `warm-up` e inspeção de dados em JSON! Tudo isso estimulado pelos testes de carga no [Grafana k6](https://grafana.com/docs/k6/latest/).
+## Conceito do Projeto
+O foco principal deste projeto é a arquitetura de performance. Em vez de depender de chamadas constantes a serviços externos, a aplicação utiliza uma estratégia de cache para otimizar o tempo de resposta:
 
-## O que muda em relação ao artigo?
+ * Simulação de Dados: Nesta versão, os dados dos veículos são gerados internamente (Mock) para garantir a estabilidade do ambiente de testes.
+ * Cache Hit/Miss: Na primeira consulta, o sistema procura o dado na base de dados/mock e armazena-o no Redis.
+ * Performance: Consultas subsequentes são servidas diretamente pela memória (Redis), reduzindo a latência para quase zero.
+ * Warm-up: O sistema possui um mecanismo de carga inicial (Warm-up) que popula o cache com "hot keys" assim que a aplicação inicia.
 
-- **Testes de carga integrados**: adicionamos cenários de concorrência com o `Grafana k6` via script orquestrador (`run_poc.sh`).
-- **Mais legibilidade**: o cache deixou de usar serialização binária e passou para JSON, facilitando a leitura direta no `redis-cli` e na extensão _Redis for VS Code_.
-- **Cenários extremos forçados**: 
-  - O TTL foi reduzido para 6 segundos para forçar expirações rápidas e evidenciar o `stampede`.
-  - A consulta ao banco ganhou um `pg_sleep(0.05)` (50ms) simulado.
-  - O banco imita cenários de produção com `pool de conexão` limitado gerando gargalo.
-  - Inserimos um processo de `warm-up` no startup das 5 chaves quentes.
+## Como Executar
 
-## Fluxo de consulta
+**Pré-requisitos**
 
-```mermaid
-flowchart LR
-    C[Cliente] --> A[Fipe API]
-    A --> H{Cache HIT?}
-    H -- Sim --> R[(Redis)]
-    H -- Nao --> P[(PostgreSQL)]
-    P --> R
-    R --> A
+ * Docker e Docker Compose instalados.
+ * JDK 21 (caso queira compilar localmente).
+
+**Passos para Instalação**
+
+1. Clonar o repositório
+```
+git clone [https://github.com/jeanvitorvieira/fipe-search.git](https://github.com/jeanvitorvieira/fipe-search.git
 ```
 
-## Subindo a infraestrutura local
+2. Ir até a pasta do projeto
+```
+cd fipe-search
+```
 
-**Pré-requisitos:** Java 25, Docker e ambiente Bash (Git Bash, WSL, Linux ou macOS).
+3. Compilar o executável (JAR)
+```
+./mvnw clean package -DskipTests
+```
 
-Suba os bancos (Postgres e Redis):
-```bash
+4. Subir os containers (Aplicação, Redis, Postgres)
+```
 cd docker
-docker compose up -d postgres redis
-cd ..
+docker compose up -d --build
 ```
 
-Inicie a aplicação Spring Boot:
-```bash
-./mvnw spring-boot:run
+#3 Endpoints Disponíveis
+
+A API utiliza dois parâmetros principais para a localização do veículo: modeloId e anoModelo.
+
+1. Consultar Veículo
+Retorna os detalhes do preço. Se o dado já estiver no cache, a resposta será instantânea.
 ```
-*(No Windows via PowerShell, use `.\mvnw.cmd spring-boot:run`)*
-
-## Rodando a POC da Live
-
-Com a aplicação rodando, execute o script para aplicar a carga de `200` VUs por `20s` em 5 chaves quentes:
-
-```bash
-chmod +x ./run_poc.sh
-./run_poc.sh
+ * Método: GET
+ * URL: /fipe/{modeloId}/{anoModelo}
+ * Exemplo: curl -i http://localhost:8081/fipe/1/2023
 ```
 
-Isso recria os contêineres e atualiza os resultados no arquivo de log da POC.
-
-**Resumo dos resultados de stress:**
-| Cenário testado | RPS | p95 | Erros |
-|---|---:|---:|---:|
-| **Direct DB** (Gargalo do pool) | ~23k | 17.6ms | >1000 |
-| **Cache c/ TTL curto** (Stampede) | ~23k | 17.7ms | >1300 |
-| **Cache Aquecido** (Cenário Ideal) | ~29k | 16.6ms | **0** |
-
-*O relatório atual demonstra que o ambiente aquecido entrega o melhor cenário — zero erros e pouquíssimos "misses".* Relatório completo: [`poc-results-live.md`](poc-results-live.md).
-
-## Inspecionando o Redis
-
-A chave de cache acompanha o padrão `fipe::modeloId:anoModelo`. Para checar no CLI:
-
-```bash
-redis-cli GET fipe::1:2023
+2. Invalidar Cache
+Remove manualmente o registo do Redis, forçando uma nova consulta na base de dados na próxima chamada.
 ```
-Ou simplemente use o cliente do Redis para VS Code.
+ * Método: DELETE
+ * URL: /fipe/{modeloId}/{anoModelo}/cache
+ * Exemplo: curl -i -X DELETE http://localhost:8081/fipe/1/2023/cache
+```
